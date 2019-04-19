@@ -1,3 +1,1 @@
-Backend for tapdef app. Entire backend is currently on AWS in the `aws_backend` directory, but I started to transition some lambdas to Google Cloud, since they are just proxies for Google vision and translation APIs. Turns out that start-up time for functions is way longer than for lambdas, which is why I'm sticking with AWS for now.
-
-The `google_backend` directory contains a 100% working backend for the ocr endpoint, though. It's hooked up to the `hamik@bihedral.com` account.
+Backend for the dictpic app. `aws_backend` contains an entire working backend, but some of the lambdas are just proxies for calls to Google services, like the OCR one. `google_backend` contains a few functions that can be used instead, but their startup time is much longer than lambda startup times.
