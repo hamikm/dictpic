@@ -1,0 +1,191 @@
+service: tapdef-backend
+
+plugins:
+  - serverless-hooks-plugin
+  - serverless-dynamodb-autoscaling
+
+custom:
+  hooks:
+    after:aws:deploy:finalize:cleanup:
+      - scripts/setup.sh ${opt:stage}
+  capacities:
+    - table: SearchCountsTable
+      read:
+        minimum: 1
+        maximum: 5
+        usage: 0.5
+      write:
+        minimum: 1
+        maximum: 5
+        usage: 0.5
+    - table: OcrCountsTable
+      read:
+        minimum: 1
+        maximum: 5
+        usage: 0.5
+      write:
+        minimum: 1
+        maximum: 5
+        usage: 0.5
+    - table: ICloudUserNames
+      read:
+        minimum: 1
+        maximum: 5
+        usage: 0.5
+      write:
+        minimum: 1
+        maximum: 5
+        usage: 0.5
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  stage: ${opt:stage}
+  region: us-east-1
+  memorySize: 192
+
+  environment:
+    STAGE: ${opt:stage}
+    ICLOUD_USER_ID_HASH_LENGTH: '33'
+    DEV_DEVICE_CHECK_API_URL: api.development.devicecheck.apple.com
+    PROD_DEVICE_CHECK_API_URL: api.devicecheck.apple.com
+    APPLE_DEVICE_CHECK_CERT: ${ssm:apple_device_check_cert~true}
+    APPLE_DEVICE_CHECK_KEY_ID: ${ssm:apple_device_check_key_id~true}
+    APPLE_ITUNES_CONNECT_TEAM_ID: ${ssm:apple_itunes_connect_team_id~true}
+    BEGIN_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----'
+    END_PRIVATE_KEY: '-----END PRIVATE KEY-----'
+    ICLOUD_USER_NAMES_TABLE: ${self:service}-${opt:stage}-icloud-user-names
+    MAX_DEVICES_PER_ICLOUD_USER: '25'
+    OVERRIDE_DEVICE_CHECK: 'yes'
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:*
+      Resource: { "Fn::Join" : ["",["arn:aws:dynamodb:",{"Ref":"AWS::Region"},":*:*"]] }
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+      Resource: "*"
+
+functions:
+
+  Health:
+    handler: lambdas/misc/health.main
+    environment:
+      LOG_DEBUG_STATEMENTS: no
+    events:
+      - http:
+          path: health
+          method: post
+          cors: true
+
+  GetGoogleTranslateLanguages:
+    handler: lambdas/translation/getLanguages.main
+    environment:
+      TRANSLATION_LANGUAGES_API_URL: 'https://translation.googleapis.com/language/translate/v2/languages'
+      LOG_DEBUG_STATEMENTS: yes
+      GOOGLE_TRANSLATE_API_KEY: ${ssm:google_translate_${opt:stage}_key~true}
+    events:
+      - http:
+          path: translate/google/languages
+          method: post
+          cors: true
+
+  GetGoogleMultiOCR:
+    handler: lambdas/ocr/getGoogleMultiOCR.main
+    environment:
+      LOG_DEBUG_STATEMENTS: yes
+      API_KEY_TEMPLATE_CODE: '{{api-key}}'
+      GOOGLE_OCR_API_URL: 'https://vision.googleapis.com/v1/images:annotate?key={{api-key}}'
+      GOOGLE_OCR_API_KEY: ${ssm:google_ocr_${opt:stage}~true}
+      OCR_COUNTS_TABLE: ${self:service}-${opt:stage}-ocr-rates
+      GLOBAL_OCR_THRESHOLD_HR: '120'
+      GLOBAL_OCR_THRESHOLD_DAY: '480'
+      GLOBAL_OCR_THRESHOLD_WEEK: 'Infinity'
+      GLOBAL_OCR_THRESHOLD_MONTH: '10000'
+      GLOBAL_OCR_THRESHOLD_YEAR: 'Infinity'
+      FREE_OCR_THRESHOLD_HR: '5'
+      FREE_OCR_THRESHOLD_DAY: 'Infinity'
+      FREE_OCR_THRESHOLD_WEEK: 'Infinity'
+      FREE_OCR_THRESHOLD_MONTH: '15'
+      FREE_OCR_THRESHOLD_YEAR: 'Infinity'
+    events:
+      - http:
+          path: ocr/google/multi
+          method: post
+          cors: true
+
+  AggregatedSearch:
+    handler: lambdas/aggregatedSearch.main
+    environment:
+      LOG_DEBUG_STATEMENTS: yes
+      SEARCH_COUNTS_TABLE: ${self:service}-${opt:stage}-search-rates
+      GLOBAL_SEARCH_THRESHOLD_HR: '120'
+      GLOBAL_SEARCH_THRESHOLD_DAY: '480'
+      GLOBAL_SEARCH_THRESHOLD_WEEK: 'Infinity'
+      GLOBAL_SEARCH_THRESHOLD_MONTH: '10000'
+      GLOBAL_SEARCH_THRESHOLD_YEAR: 'Infinity'
+      FREE_SEARCH_THRESHOLD_HR: '5'
+      FREE_SEARCH_THRESHOLD_DAY: 'Infinity'
+      FREE_SEARCH_THRESHOLD_WEEK: 'Infinity'
+      FREE_SEARCH_THRESHOLD_MONTH: '15'
+      FREE_SEARCH_THRESHOLD_YEAR: 'Infinity'
+      USER_AGENT: 'tapdef/0.1 (bihedral.com; hamik@bihedral.com)'
+      LANG_CODE_TEMPLATE_TOKEN: '{{lang code}}'
+      WIKIPEDIA_API_URL: 'https://{{lang code}}.wikipedia.org/w/api.php'
+      SEARCH_LIMIT: '3'
+      OED_APP_ID: ${ssm:oed_app_id_${opt:stage}~true}
+      OED_API_KEY: ${ssm:oed_api_cred_${opt:stage}~true}
+      OED_API_BASE_URL: 'https://od-api.oxforddictionaries.com/api/v1'
+      TRANSLATION_API_URL: 'https://translation.googleapis.com/language/translate/v2'
+      GOOGLE_TRANSLATE_API_KEY: ${ssm:google_translate_${opt:stage}_key~true}
+    events:
+      - http:
+          path: search
+          method: post
+          cors: true
+
+resources:
+  Resources:
+    SearchCountsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${opt:stage}-search-rates
+        AttributeDefinitions:
+          - AttributeName: u  # iCloud user name hash
+            AttributeType: S  # string
+        KeySchema:
+          - AttributeName: u
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+
+    OcrCountsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${opt:stage}-ocr-rates
+        AttributeDefinitions:
+          - AttributeName: u  # iCloud user name hash
+            AttributeType: S  # string
+        KeySchema:
+          - AttributeName: u
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+
+    ICloudUserNames:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${opt:stage}-icloud-user-names
+        AttributeDefinitions:
+          - AttributeName: u  # iCloud user name hash
+            AttributeType: S  # string
+        KeySchema:
+          - AttributeName: u
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5

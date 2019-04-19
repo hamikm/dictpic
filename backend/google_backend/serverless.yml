@@ -1,0 +1,26 @@
+service: tapdef-backend
+
+provider:
+  name: google
+  runtime: nodejs8
+  project: tapdefine
+  region: us-central1
+  credentials: '~/creds/tapdefine-ca1e8814f69f.json'
+
+plugins:
+  - serverless-google-cloudfunctions
+
+package:
+  exclude:
+    - node_modules/**
+    - .gitignore
+
+functions:
+  ocr:
+    handler: ocr
+    # Environment variables not supported yet in serverless for gcloud.
+    # These vars are set in code in lib/constants.js
+    # environmentVariables:
+    #   LOG_DEBUG_STATEMENTS: yes
+    events:
+      - http: ocr
